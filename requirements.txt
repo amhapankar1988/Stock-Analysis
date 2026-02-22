@@ -1,0 +1,25 @@
+# UI and Hosting
+gradio
+
+# Stock Data Extraction & Analysis
+yfinance
+finvizfinance
+pandas
+numpy
+
+# IBM watsonx.ai Integration
+# Using the dedicated LangChain-IBM integration for smoother connectivity
+langchain-ibm
+ibm-watsonx-ai
+
+# RAG (Retrieval-Augmented Generation) & Knowledge Base
+langchain
+langchain-community
+langchain-text-splitters
+langchain-huggingface
+sentence-transformers
+faiss-cpu
+pypdf
+
+# Utilities
+python-dotenv
