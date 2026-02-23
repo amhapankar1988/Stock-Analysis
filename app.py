@@ -16,7 +16,7 @@ WATSONX_URL = "https://ca-tor.ml.cloud.ibm.com"
 
 # Initialize ChatWatsonx (The modern LangChain-IBM standard)
 llm = ChatWatsonx(
-    model_id="meta-llama/llama-3-1-70b-instruct",
+    model_id="meta-llama/llama-3-3-70b-instruct",
     url=WATSONX_URL,
     project_id=PROJECT_ID,
     apikey=WATSONX_APIKEY,
