@@ -110,31 +110,32 @@ def run_strategic_scan():
 
 # --- GRADIO DASHBOARD ---
 
-with gr.Blocks(theme=gr.themes.Soft(), title="Livermore-CANSLIM AI") as demo:
+with gr.Blocks(theme=gr.themes.Soft(), title="Stock-Analysis", fill_height=True) as demo:
     gr.Markdown("# 📈 Strategic Trader AI Dashboard")
     
     with gr.Row():
-        # Left Column
+        # Left Column (Replaces Sidebar)
         with gr.Column(scale=1, variant="panel"):
             gr.Markdown("### 📚 Knowledge Management")
-            # Removed label from Sidebar if still present; keeping File simple
-            book_upload = gr.File(label="Upload Strategy Books") 
-            train_btn = gr.Button("🧠 Train AI on Books")
+            book_upload = gr.File(label="Upload Strategy Books (PDF)", file_count="multiple")
+            train_btn = gr.Button("🧠 Train AI on Books", variant="secondary")
             status_label = gr.Textbox(label="System Status", value="Idle", interactive=False)
             gr.Markdown("---")
             scan_btn = gr.Button("🚀 Run Real-Time Scan", variant="primary")
 
-        # Right Column
+        # Right Column (Main Dashboard)
         with gr.Column(scale=3):
             with gr.Row():
-                with gr.Column():
+                with gr.Column(scale=2):
                     gr.Markdown("### 📊 Live Candidates")
-                    # Simplified DataFrame - removing custom headers temporarily to test
-                    output_table = gr.DataFrame(label="Filtered Tickers")
+                    output_table = gr.DataFrame(
+                        headers=["Ticker", "Current Price", "RS vs SPY", "Status"],
+                        label="Filtered Momentum Tickers"
+                    )
                 
-                with gr.Column():
+                with gr.Column(scale=3):
                     gr.Markdown("### 🤖 Strategy Analysis")
-                    output_text = gr.Markdown("Waiting for data...")
+                    output_text = gr.Markdown("Waiting for market data analysis...")
 
     # Event Handlers
     train_btn.click(ingest_strategy_books, inputs=[book_upload], outputs=[status_label])
