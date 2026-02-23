@@ -1,3 +1,4 @@
+audioop-lts
 # UI and Hosting
 gradio
 
