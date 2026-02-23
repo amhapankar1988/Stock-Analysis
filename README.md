@@ -1,11 +1,10 @@
 ---
-title: Stock Analysis & Scanner
+title: Stock Analysis
 emoji: 📈
 colorFrom: blue
 colorTo: green
 sdk: gradio
-sdk_version: 5.0.0
-python_version: 3.12
+sdk_version: 5.16.0
 app_file: app.py
 pinned: false
 ---
