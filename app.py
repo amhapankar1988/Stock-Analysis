@@ -108,31 +108,34 @@ def run_strategic_scan():
     final_df = pd.DataFrame(table_data, columns=["Ticker", "Current Price", "RS vs SPY", "Status"])
     return final_df, ai_verdict or "Market scan complete. No high-conviction pivots detected."
 
-# --- GRADIO 6 DASHBOARD ---
+# --- GRADIO DASHBOARD ---
 
-with gr.Blocks(theme=gr.themes.Soft(), title="Livermore-CANSLIM AI", fill_height=True) as demo:
+with gr.Blocks(theme=gr.themes.Soft(), title="Stock-Analysis-Scanner", fill_height=True) as demo:
     gr.Markdown("# 📈 Strategic Trader AI Dashboard")
     
-    with gr.Sidebar(label="Knowledge Management", open=True):
-        gr.Markdown("### 1. Training")
-        book_upload = gr.File(label="Upload Strategy Books (PDF)", file_count="multiple")
-        train_btn = gr.Button("🧠 Train AI on Books", variant="secondary")
-        status_label = gr.Textbox(label="System Status", value="Idle", interactive=False)
-        gr.Markdown("---")
-        gr.Markdown("### 2. Execution")
-        scan_btn = gr.Button("🚀 Run Real-Time Scan", variant="primary")
+    with gr.Row():
+        # Left Column (Replaces Sidebar)
+        with gr.Column(scale=1, variant="panel"):
+            gr.Markdown("### 📚 Knowledge Management")
+            book_upload = gr.File(label="Upload Strategy Books (PDF)", file_count="multiple")
+            train_btn = gr.Button("🧠 Train AI on Books", variant="secondary")
+            status_label = gr.Textbox(label="System Status", value="Idle", interactive=False)
+            gr.Markdown("---")
+            scan_btn = gr.Button("🚀 Run Real-Time Scan", variant="primary")
 
-    with gr.Row(equal_height=True):
-        with gr.Column(scale=2):
-            gr.Markdown("### 📊 Live Candidates")
-            output_table = gr.DataFrame(
-                headers=["Ticker", "Current Price", "RS vs SPY", "Status"],
-                label="Filtered Momentum Tickers"
-            )
-            
+        # Right Column (Main Dashboard)
         with gr.Column(scale=3):
-            gr.Markdown("### 🤖 Strategy Analysis")
-            output_text = gr.Markdown("Waiting for market data analysis...")
+            with gr.Row():
+                with gr.Column(scale=2):
+                    gr.Markdown("### 📊 Live Candidates")
+                    output_table = gr.DataFrame(
+                        headers=["Ticker", "Current Price", "RS vs SPY", "Status"],
+                        label="Filtered Momentum Tickers"
+                    )
+                
+                with gr.Column(scale=3):
+                    gr.Markdown("### 🤖 Strategy Analysis")
+                    output_text = gr.Markdown("Waiting for market data analysis...")
 
     # Event Handlers
     train_btn.click(ingest_strategy_books, inputs=[book_upload], outputs=[status_label])
