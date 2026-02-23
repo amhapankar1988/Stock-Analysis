@@ -12,7 +12,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 # --- CONFIGURATION & SECRETS ---
 WATSONX_APIKEY = os.getenv("WATSONX_APIKEY")
 PROJECT_ID = os.getenv("WATSONX_PROJECT_ID")
-WATSONX_URL = "https://us-south.ml.cloud.ibm.com"
+WATSONX_URL = "https://ca-tor.ml.cloud.ibm.com"
 
 # Initialize ChatWatsonx (The modern LangChain-IBM standard)
 llm = ChatWatsonx(
