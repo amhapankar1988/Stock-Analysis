@@ -1,8 +1,10 @@
+websockets>=13.0
+yfinance>=0.2.50
+
 # UI and Hosting
 gradio
 
 # Stock Data Extraction & Analysis
-yfinance
 finvizfinance
 pandas
 numpy
