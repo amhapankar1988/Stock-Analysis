@@ -1,5 +1,5 @@
 ---
-title: Livermore CANSLIM Scanner
+title: Stock Analysis & Scanner
 emoji: 📈
 colorFrom: blue
 colorTo: green
