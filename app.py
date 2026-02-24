@@ -1,14 +1,18 @@
 import os
 import time
+import requests
 import gradio as gr
 import pandas as pd
 import yfinance as yf
+from requests.adapters import HTTPAdapter
+from urllib3.util import Retry
 from finvizfinance.screener.overview import Overview
 from langchain_ibm import ChatWatsonx
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
+
 
 # --- CONFIGURATION & SECRETS ---
 WATSONX_APIKEY = os.getenv("WATSONX_APIKEY")
@@ -88,73 +92,96 @@ def ingest_strategy_books(file_objs, progress=gr.Progress()):
     except Exception as e:
         return f"❌ Error: {str(e)}"
 
+
+# --- NEW: BROWSER EMULATION SESSION ---
+def get_yf_session():
+    session = requests.Session()
+    # Identifying as a modern browser to bypass 429 blocks
+    session.headers.update({
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+    })
+    # Add retries for stability
+    retries = Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504])
+    session.mount('https://', HTTPAdapter(max_retries=retries))
+    return session
+
 def run_strategic_scan(progress=gr.Progress()):
     global vector_db
     if vector_db is None:
         return None, "### ⚠️ Error: Please upload and 'Train' on your books first!"
 
+    session = get_yf_session()
+    
     try:
         progress(0.1, desc="🔍 Screening market for CANSLIM fundamentals...")
         foverview = Overview()
-        
-        # FIXED: Specific spacing required by finvizfinance library
+        # Ensure exact spacing for Finviz library
         filters = {
             'EPS growthqtr over qtr': 'Over 25%',
             'Sales growthqtr over qtr': 'Over 25%',
             '200-Day Simple Moving Average': 'Price above SMA200'
         }
-        
         foverview.set_filter(filters_dict=filters)
         df_screener = foverview.screener_view()
         
         if df_screener is None or df_screener.empty:
-            return None, "No stocks currently meet the basic CANSLIM fundamental criteria."
+            return None, "No stocks currently meet CANSLIM fundamental criteria."
 
-        # SPEED WIN: Batch download all tickers in one go
-        candidates = df_screener['Ticker'].tolist()[:15]
-        progress(0.3, desc=f"📈 Downloading data for {len(candidates)} tickers...")
-        
-        all_data = yf.download(candidates + ["SPY"], period="1y", threads=True, progress=False)
-        spy_hist = all_data['Close']['SPY']
-        
+        candidates = df_screener['Ticker'].tolist()[:12]
         table_data = []
         ai_verdict = ""
 
-        # Pre-fetch context once to save AI processing time
-        docs = vector_db.similarity_search("How to identify a high-volume pocket pivot breakout", k=4)
+        # Retrieve Strategy Context Once
+        docs = vector_db.similarity_search("How to trade a breakout from a base or pivot", k=3)
         context = "\n".join([d.page_content for d in docs])
 
-        for ticker in candidates:
-            if ticker == "SPY": continue
+        # Benchmark: Get SPY first
+        progress(0.2, desc="📊 Fetching SPY benchmark...")
+        spy_hist = yf.download("SPY", period="1y", session=session, progress=False, threads=False)
+        if spy_hist.empty:
+            return None, "❌ Yahoo Finance blocked the benchmark request. Try again in 2 minutes."
+
+        for i, ticker in enumerate(candidates):
+            progress(0.3 + (i/len(candidates))*0.6, desc=f"📈 Analyzing {ticker}...")
             
-            # Extract individual stock data from the batch
-            hist_close = all_data['Close'][ticker].dropna()
-            hist_high = all_data['High'][ticker].dropna()
+            # Requesting one by one with a session is safer on Hugging Face
+            data = yf.download(ticker, period="1y", session=session, progress=False, threads=False)
             
-            if len(hist_close) < 200: continue
-            
-            # Simple manual RS and Pivot checks
-            stock_perf = (hist_close.iloc[-1] / hist_close.iloc[0]) - 1
-            spy_perf = (spy_hist.iloc[-1] / spy_hist.iloc[0]) - 1
+            if data.empty or len(data) < 200:
+                continue
+
+            # Extracting Close prices correctly (handling MultiIndex if necessary)
+            close = data['Close'].iloc[:, 0] if isinstance(data['Close'], pd.DataFrame) else data['Close']
+            highs = data['High'].iloc[:, 0] if isinstance(data['High'], pd.DataFrame) else data['High']
+            spy_close = spy_hist['Close'].iloc[:, 0] if isinstance(spy_hist['Close'], pd.DataFrame) else spy_hist['Close']
+
+            # Relative Strength vs SPY
+            stock_perf = (close.iloc[-1] / close.iloc[0]) - 1
+            spy_perf = (spy_close.iloc[-1] / spy_close.iloc[0]) - 1
             rs_score = round((stock_perf - spy_perf) * 100, 2)
             
-            high_52w = hist_high.max()
-            curr_price = hist_close.iloc[-1]
+            # Pivot Check (Within 5% of 52-week High)
+            high_52w = highs.max()
+            curr = close.iloc[-1]
             
-            if rs_score > 0 and curr_price >= (high_52w * 0.95):
-                table_data.append([ticker, f"${curr_price:.2f}", f"{rs_score}%", "PIVOT WATCH"])
+            if rs_score > 0 and curr >= (high_52w * 0.95):
+                table_data.append([ticker, f"${curr:.2f}", f"{rs_score}%", "PIVOT WATCH"])
                 
-                # AI Analysis
-                prompt = (f"Context: {context}\n\n"
-                         f"Analysis: {ticker} is at ${curr_price:.2f} (52w High: ${high_52w:.2f}). "
-                         f"Market outperformance is {rs_score}%. Is this a valid breakout setup?")
+                prompt = (f"Trader Guide: {context}\n\n"
+                          f"Ticker: {ticker}\nPrice: ${curr:.2f} (52w High: ${high_52w:.2f})\n"
+                          f"Market Outperformance: {rs_score}%\n"
+                          f"Verdict based on strategy:")
                 
                 response = llm.invoke(prompt)
                 ai_verdict += f"## {ticker} Analysis\n{response.content}\n\n---\n"
+            
+            # Tiny delay to prevent rate-limiting
+            time.sleep(0.3)
 
         final_df = pd.DataFrame(table_data, columns=["Ticker", "Price", "RS vs SPY", "Status"])
-        progress(1.0, desc="Scan Complete!")
-        return final_df, ai_verdict or "Market scan complete. No high-conviction pivots detected."
+        return final_df, ai_verdict or "Market scan complete. No breakout pivots detected."
 
     except Exception as e:
         return None, f"### ❌ Error during scan: {str(e)}"
