@@ -88,58 +88,62 @@ def ingest_strategy_books(file_objs, progress=gr.Progress()):
     except Exception as e:
         return f"❌ Error: {str(e)}"
 
-def run_strategic_scan():
+def run_strategic_scan(progress=gr.Progress()):
     global vector_db
     if vector_db is None:
         return None, "### ⚠️ Error: Please upload and 'Train' on your books first!"
 
-    # 1. CANSLIM Screen (Finviz)
+    progress(0.1, desc="🔍 Screening market for CANSLIM fundamentals...")
     foverview = Overview()
-    filters = {
-        'EPS growth qtr over qtr': 'Over 25%',
-        'Sales growth qtr over qtr': 'Over 25%',
-        'Price': 'Above SMA200'
-    }
+    filters = {'EPS growth qtr over qtr': 'Over 25%', 'Sales growth qtr over qtr': 'Over 25%', 'Price': 'Above SMA200'}
     foverview.set_filter(filters_dict=filters)
     df_screener = foverview.screener_view()
     
     if df_screener is None or df_screener.empty:
-        return None, "No stocks currently meet the basic CANSLIM fundamental criteria."
+        return None, "No stocks met criteria."
 
-    spy_hist = yf.Ticker("SPY").history(period="1y")
-    candidates = df_screener['Ticker'].tolist()[:12] 
+    # --- SPEED OPTIMIZATION: BATCH DOWNLOAD ---
+    candidates = df_screener['Ticker'].tolist()[:15]
+    progress(0.3, desc=f"📈 Downloading data for {len(candidates)} tickers...")
+    
+    # Download all history at once (Multi-threaded by default in yfinance)
+    all_data = yf.download(candidates + ["SPY"], period="1y", group_by='ticker', threads=True, progress=False)
+    spy_hist = all_data['SPY']
     
     table_data = []
-    ai_verdict = ""
+    analysis_queue = []
 
     for ticker in candidates:
-        try:
-            stock = yf.Ticker(ticker)
-            hist = stock.history(period="1y")
-            if len(hist) < 200: continue
-            
-            rs_score = calculate_rs(ticker, hist, spy_hist)
-            is_pivot, curr, high = check_pivot_status(hist)
-            
-            if rs_score > 0 and is_pivot:
-                table_data.append([ticker, f"${curr:.2f}", f"{rs_score}%", "PIVOT WATCH"])
-                
-                # RAG Retrieval
-                docs = vector_db.similarity_search(f"Trading strategy for {ticker} near breakout", k=3)
-                context = "\n".join([d.page_content for d in docs])
-                
-                prompt = (f"System: You are a master trader following Jesse Livermore and William O'Neal.\n"
-                         f"Context: {context}\n\n"
-                         f"Stock Data: {ticker} is at ${curr:.2f} (52w High: ${high:.2f}). RS Score: {rs_score}.\n"
-                         f"Task: Provide a concise tactical verdict based on the strategy books.")
-                
-                response = llm.invoke(prompt)
-                ai_verdict += f"## {ticker} Analysis\n{response.content}\n\n---\n"
-        except Exception:
-            continue
+        if ticker == "SPY" or ticker not in all_data: continue
+        hist = all_data[ticker].dropna()
+        if len(hist) < 200: continue
+        
+        rs_score = calculate_rs(ticker, hist, spy_hist)
+        is_pivot, curr, high = check_pivot_status(hist)
+        
+        if rs_score > 0 and is_pivot:
+            table_data.append([ticker, f"${curr:.2f}", f"{rs_score}%", "PIVOT WATCH"])
+            analysis_queue.append({"ticker": ticker, "curr": curr, "rs": rs_score, "high": high})
 
-    final_df = pd.DataFrame(table_data, columns=["Ticker", "Current Price", "RS vs SPY", "Status"])
-    return final_df, ai_verdict or "Market scan complete. No high-conviction pivots detected currently."
+    # --- SPEED OPTIMIZATION: SMARTER RAG ---
+    if not analysis_queue:
+        return pd.DataFrame(table_data, columns=["Ticker", "Price", "RS", "Status"]), "No pivots found."
+
+    progress(0.7, desc="🧠 AI analyzing high-conviction setups...")
+    
+    # Get general strategy context once to save time
+    docs = vector_db.similarity_search("How to identify a high-volume pocket pivot breakout", k=5)
+    context = "\n".join([d.page_content for d in docs])
+    
+    ai_verdict = ""
+    for item in analysis_queue:
+        # Note: For even more speed, you could combine these into ONE prompt for the LLM
+        prompt = f"Strategy Context: {context}\n\nAnalyze {item['ticker']} at ${item['curr']} (RS: {item['rs']}%). Is this a buy point?"
+        response = llm.invoke(prompt)
+        ai_verdict += f"## {item['ticker']}\n{response.content}\n\n"
+
+    progress(1.0, desc="Done!")
+    return pd.DataFrame(table_data, columns=["Ticker", "Price", "RS", "Status"]), ai_verdict
 
 # --- GRADIO DASHBOARD ---
 
