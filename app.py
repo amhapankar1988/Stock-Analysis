@@ -53,8 +53,11 @@ def ingest_strategy_books(files):
     if not files: return "Please upload at least one PDF."
     
     documents = []
-    for file in files:
-        loader = PyPDFLoader(file.name)
+    for file in file_objs:
+    # If 'file' is already a string (path), use it directly. 
+    # If it's a file object/dict, get the path.
+        file_path = file if isinstance(file, str) else file.get("path", file.name)
+        loader = PyPDFLoader(file_path)
         documents.extend(loader.load())
     
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
