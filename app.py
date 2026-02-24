@@ -93,57 +93,71 @@ def run_strategic_scan(progress=gr.Progress()):
     if vector_db is None:
         return None, "### ⚠️ Error: Please upload and 'Train' on your books first!"
 
-    progress(0.1, desc="🔍 Screening market for CANSLIM fundamentals...")
-    foverview = Overview()
-    filters = {'EPS growth qtr over qtr': 'Over 25%', 'Sales growth qtr over qtr': 'Over 25%', 'Price': 'Above SMA200'}
-    foverview.set_filter(filters_dict=filters)
-    df_screener = foverview.screener_view()
-    
-    if df_screener is None or df_screener.empty:
-        return None, "No stocks met criteria."
-
-    # --- SPEED OPTIMIZATION: BATCH DOWNLOAD ---
-    candidates = df_screener['Ticker'].tolist()[:15]
-    progress(0.3, desc=f"📈 Downloading data for {len(candidates)} tickers...")
-    
-    # Download all history at once (Multi-threaded by default in yfinance)
-    all_data = yf.download(candidates + ["SPY"], period="1y", group_by='ticker', threads=True, progress=False)
-    spy_hist = all_data['SPY']
-    
-    table_data = []
-    analysis_queue = []
-
-    for ticker in candidates:
-        if ticker == "SPY" or ticker not in all_data: continue
-        hist = all_data[ticker].dropna()
-        if len(hist) < 200: continue
+    try:
+        progress(0.1, desc="🔍 Screening market for CANSLIM fundamentals...")
+        foverview = Overview()
         
-        rs_score = calculate_rs(ticker, hist, spy_hist)
-        is_pivot, curr, high = check_pivot_status(hist)
+        # FIXED: Specific spacing required by finvizfinance library
+        filters = {
+            'EPS growthqtr over qtr': 'Over 25%',
+            'Sales growthqtr over qtr': 'Over 25%',
+            '200-Day Simple Moving Average': 'Price above SMA200'
+        }
         
-        if rs_score > 0 and is_pivot:
-            table_data.append([ticker, f"${curr:.2f}", f"{rs_score}%", "PIVOT WATCH"])
-            analysis_queue.append({"ticker": ticker, "curr": curr, "rs": rs_score, "high": high})
+        foverview.set_filter(filters_dict=filters)
+        df_screener = foverview.screener_view()
+        
+        if df_screener is None or df_screener.empty:
+            return None, "No stocks currently meet the basic CANSLIM fundamental criteria."
 
-    # --- SPEED OPTIMIZATION: SMARTER RAG ---
-    if not analysis_queue:
-        return pd.DataFrame(table_data, columns=["Ticker", "Price", "RS", "Status"]), "No pivots found."
+        # SPEED WIN: Batch download all tickers in one go
+        candidates = df_screener['Ticker'].tolist()[:15]
+        progress(0.3, desc=f"📈 Downloading data for {len(candidates)} tickers...")
+        
+        all_data = yf.download(candidates + ["SPY"], period="1y", threads=True, progress=False)
+        spy_hist = all_data['Close']['SPY']
+        
+        table_data = []
+        ai_verdict = ""
 
-    progress(0.7, desc="🧠 AI analyzing high-conviction setups...")
-    
-    # Get general strategy context once to save time
-    docs = vector_db.similarity_search("How to identify a high-volume pocket pivot breakout", k=5)
-    context = "\n".join([d.page_content for d in docs])
-    
-    ai_verdict = ""
-    for item in analysis_queue:
-        # Note: For even more speed, you could combine these into ONE prompt for the LLM
-        prompt = f"Strategy Context: {context}\n\nAnalyze {item['ticker']} at ${item['curr']} (RS: {item['rs']}%). Is this a buy point?"
-        response = llm.invoke(prompt)
-        ai_verdict += f"## {item['ticker']}\n{response.content}\n\n"
+        # Pre-fetch context once to save AI processing time
+        docs = vector_db.similarity_search("How to identify a high-volume pocket pivot breakout", k=4)
+        context = "\n".join([d.page_content for d in docs])
 
-    progress(1.0, desc="Done!")
-    return pd.DataFrame(table_data, columns=["Ticker", "Price", "RS", "Status"]), ai_verdict
+        for ticker in candidates:
+            if ticker == "SPY": continue
+            
+            # Extract individual stock data from the batch
+            hist_close = all_data['Close'][ticker].dropna()
+            hist_high = all_data['High'][ticker].dropna()
+            
+            if len(hist_close) < 200: continue
+            
+            # Simple manual RS and Pivot checks
+            stock_perf = (hist_close.iloc[-1] / hist_close.iloc[0]) - 1
+            spy_perf = (spy_hist.iloc[-1] / spy_hist.iloc[0]) - 1
+            rs_score = round((stock_perf - spy_perf) * 100, 2)
+            
+            high_52w = hist_high.max()
+            curr_price = hist_close.iloc[-1]
+            
+            if rs_score > 0 and curr_price >= (high_52w * 0.95):
+                table_data.append([ticker, f"${curr_price:.2f}", f"{rs_score}%", "PIVOT WATCH"])
+                
+                # AI Analysis
+                prompt = (f"Context: {context}\n\n"
+                         f"Analysis: {ticker} is at ${curr_price:.2f} (52w High: ${high_52w:.2f}). "
+                         f"Market outperformance is {rs_score}%. Is this a valid breakout setup?")
+                
+                response = llm.invoke(prompt)
+                ai_verdict += f"## {ticker} Analysis\n{response.content}\n\n---\n"
+
+        final_df = pd.DataFrame(table_data, columns=["Ticker", "Price", "RS vs SPY", "Status"])
+        progress(1.0, desc="Scan Complete!")
+        return final_df, ai_verdict or "Market scan complete. No high-conviction pivots detected."
+
+    except Exception as e:
+        return None, f"### ❌ Error during scan: {str(e)}"
 
 # --- GRADIO DASHBOARD ---
 
