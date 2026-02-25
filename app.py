@@ -143,14 +143,14 @@ def run_strategic_scan(usage_count, progress=gr.Progress()):
             context = "\n".join([d.page_content for d in docs])
             
             # DEFINE THE PROMPT (The missing piece!)
-            prompt = f"""
-            ### STRATEGY CONTEXT: {context}
-            ### DATA: {ticker} | Price: ${curr_price:.2f} | RS: {rs_score}% | Sentiment: {sentiment}
-            Audit this stock based on the strategy: 
-            - Identify the Pivot.
-            - Catalyst check.
-            - Final Verdict (BUY/WATCH/AVOID).
-            """
+            prompt = (
+                    f"Strategy Context: {context}\n\n"
+                    f"DATA: {ticker} | Price: ${curr_price:.2f} | RS: {rs_score}% | Sentiment: {sentiment}"
+                    f"Audit this stock based on the strategy: 
+                        - Identify the Pivot.
+                        - Catalyst check.
+                        - Final Verdict (BUY/WATCH/AVOID)"
+                    ) 
             
             # 3. INVOKE LLM
             res = llm.invoke(prompt) 
