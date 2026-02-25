@@ -1,22 +1,22 @@
 import os
 import time
-import gradio as gr
 import pandas as pd
+import gradio as gr
+from alpha_vantage.timeseries import TimeSeries
 from finvizfinance.screener.overview import Overview
 from langchain_ibm import ChatWatsonx
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
-from alpha_vantage.timeseries import TimeSeries
 
-# --- CONFIGURATION ---
+# --- INITIALIZATION ---
+AV_API_KEY = os.getenv("ALPHA_VANTAGE_KEY")
 WATSONX_APIKEY = os.getenv("WATSONX_APIKEY")
 PROJECT_ID = os.getenv("WATSONX_PROJECT_ID")
-AV_API_KEY = os.getenv("ALPHA_VANTAGE_KEY")
 WATSONX_URL = "https://ca-tor.ml.cloud.ibm.com"
 
-# Initialize Models
+# Models
 llm = ChatWatsonx(
     model_id="meta-llama/llama-3-3-70b-instruct",
     url=WATSONX_URL,
@@ -24,117 +24,138 @@ llm = ChatWatsonx(
     apikey=WATSONX_APIKEY,
     params={"decoding_method": "sample", "max_new_tokens": 800, "temperature": 0.2}
 )
+# Using a high-performance open-source embedding model
 embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 vector_db = None
 
-# --- CORE LOGIC ---
+# --- FUNCTIONS ---
 
 def ingest_strategy_books(file_objs, progress=gr.Progress()):
     global vector_db
-    if not file_objs: return "❌ No files uploaded."
+    if not file_objs: return "❌ Please upload strategy PDFs."
     try:
         documents = []
-        progress(0.1, desc="📄 Extracting text...")
-        if not isinstance(file_objs, list): file_objs = [file_objs]
-        for file in file_objs:
-            path = file if isinstance(file, str) else file.get("path", file.name)
+        progress(0.2, desc="📄 Reading PDFs...")
+        for file in (file_objs if isinstance(file_objs, list) else [file_objs]):
+            path = file.name if hasattr(file, 'name') else file
             documents.extend(PyPDFLoader(path).load())
         
-        progress(0.4, desc="✂️ Chunking...")
-        splits = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150).split_documents(documents)
-        
-        progress(0.6, desc="🧠 Embedding (This takes time)...")
+        splits = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100).split_documents(documents)
+        progress(0.7, desc="🧠 Creating Vector Index...")
         vector_db = FAISS.from_documents(splits, embeddings)
-        return f"✅ Success! Trained on {len(splits)} chunks."
+        return f"✅ Knowledge Base Ready: {len(splits)} strategy chunks indexed."
     except Exception as e:
-        return f"❌ Error: {str(e)}"
+        return f"❌ Ingestion Error: {str(e)}"
 
-def run_strategic_scan(progress=gr.Progress()):
+def run_strategic_scan(usage_count, progress=gr.Progress()):
     global vector_db
-    if vector_db is None: return None, None, "### ⚠️ Train on books first!"
-    if not AV_API_KEY: return None, None, "### ⚠️ Missing ALPHA_VANTAGE_KEY Secret!"
+    if vector_db is None: return None, None, "### ⚠️ Train the AI on your books first!", usage_count
+    if usage_count >= 25: return None, None, "### ❌ Daily Alpha Vantage Limit Reached (25/25).", usage_count
 
     ts = TimeSeries(key=AV_API_KEY, output_format='pandas')
+    usage = usage_count
     
     try:
-        progress(0.1, desc="🔍 Fundamental Screen...")
+        progress(0.1, desc="🔍 Screening Finviz for Momentum...")
         foverview = Overview()
+        # Initial filter for growth + technical health
         foverview.set_filter(filters_dict={
             'EPS growthqtr over qtr': 'Over 25%',
-            'Sales growthqtr over qtr': 'Over 25%',
-            '200-Day Simple Moving Average': 'Price above SMA200',
-            'Relative Volume': 'Over 1.5' 
+            'Relative Volume': 'Over 1.5',
+            '200-Day Simple Moving Average': 'Price above SMA200'
         })
-        
+        # Sort by Weekly Performance to prioritize the best candidates
         df_screener = foverview.screener_view(order='Performance (Week)', ascend=False)
+        
         if df_screener is None or df_screener.empty:
-            return None, None, "No candidates found."
+            return None, None, "No stocks currently match the momentum criteria.", usage
 
+        # Take top 4 candidates to keep API usage low
         candidates = df_screener['Ticker'].tolist()[:4]
         table_data = []
         ai_verdict = ""
 
-        # Use get_daily (FREE) instead of get_daily_adjusted (PREMIUM)
-        progress(0.2, desc="📊 Fetching SPY Benchmark...")
+        # Fetch SPY Benchmark (1 API Call)
+        progress(0.2, desc="📊 Fetching SPY (API Call)...")
         spy_data, _ = ts.get_daily(symbol='SPY', outputsize='full')
-        # Free tier uses '4. close' instead of '5. adjusted close'
-        spy_close = spy_data['4. close'].iloc[-252:] 
+        spy_close = spy_data['4. close'].iloc[-252:]
+        usage += 1
 
         for ticker in candidates:
-            progress(0.5, desc=f"📈 Analyzing {ticker}...")
-            time.sleep(12) # Respecting 5 calls/min limit
+            if usage >= 25: break
             
-            data, _ = ts.get_daily(symbol=ticker, outputsize='full')
-            close = data['4. close'].iloc[-252:]
+            progress(0.3 + (usage/25), desc=f"📈 Analyzing {ticker} (Usage: {usage}/25)...")
+            time.sleep(12) # MANDATORY: 5 calls/minute limit
             
-            # Calculations
-            stock_perf = (close.iloc[-1] / close.iloc[0]) - 1
-            spy_perf = (spy_close.iloc[-1] / spy_close.iloc[0]) - 1
-            rs_score = round((stock_perf - spy_perf) * 100, 2)
-            
-            high_52w = close.max()
-            curr = close.iloc[-1]
-            
-            if rs_score > 0 and curr >= (high_52w * 0.95):
-                table_data.append([ticker, f"${curr:.2f}", f"{rs_score}%", "TOP MOMENTUM"])
-                docs = vector_db.similarity_search(f"Strategy for {ticker}", k=2)
-                context = "\n".join([d.page_content for d in docs])
-                res = llm.invoke(f"Strategy: {context}\n\nAnalyze {ticker} at ${curr:.2f} (RS: {rs_score}%).")
-                ai_verdict += f"## {ticker} Analysis\n{res.content}\n\n---\n"
+            try:
+                data, _ = ts.get_daily(symbol=ticker, outputsize='full')
+                usage += 1
+                close = data['4. close'].iloc[-252:]
+                
+                # Calculations
+                rs_score = round(((close.iloc[-1]/close.iloc[0]) - (spy_close.iloc[-1]/spy_close.iloc[0])) * 100, 2)
+                curr_price = close.iloc[-1]
+                high_52w = close.max()
+                
+                # Pivot Watch: Within 5% of 52-week high
+                if rs_score > 0 and curr_price >= (high_52w * 0.95):
+                    table_data.append([ticker, f"${curr_price:.2f}", f"{rs_score}%", "PIVOT WATCH"])
+                    
+                    # AI Contextual Analysis
+                    docs = vector_db.similarity_search(f"trading strategy for {ticker}", k=2)
+                    context = "\n".join([d.page_content for d in docs])
+                    prompt = f"Using this strategy: {context}\n\nAnalyze {ticker} at ${curr_price:.2f} with RS {rs_score}%."
+                    res = llm.invoke(prompt)
+                    ai_verdict += f"## {ticker} Verdict\n{res.content}\n\n---\n"
+                else:
+                    table_data.append([ticker, f"${curr_price:.2f}", f"{rs_score}%", "Consolidating"])
 
-        final_df = pd.DataFrame(table_data, columns=["Ticker", "Price", "RS vs SPY", "Status"])
-        csv_path = "latest_scan_results.csv"
+            except Exception: continue
+
+        final_df = pd.DataFrame(table_data, columns=["Ticker", "Price", "RS Score", "Status"])
+        csv_path = "scan_results.csv"
         final_df.to_csv(csv_path, index=False)
         
-        return final_df, csv_path, ai_verdict or "Scan complete."
+        return final_df, csv_path, ai_verdict or "Scan complete. Review results below.", usage
 
     except Exception as e:
-        # Improved error catching to see exactly what Alpha Vantage says
-        return None, None, f"### ❌ API Error: {str(e)}"
+        return None, None, f"### ❌ API Error: {str(e)}", usage
 
-# --- UPDATED GRADIO UI ---
-with gr.Blocks(theme=gr.themes.Soft(), title="Strategic Trader AI") as demo:
-    gr.Markdown("# 📈 Alpha-Vantage Powered Strategic AI")
+# --- GRADIO UI ---
+with gr.Blocks(theme=gr.themes.Soft(), title="AI Strategic Scanner") as demo:
+    usage_state = gr.State(value=0) # Persists usage during session
+    
+    gr.Markdown("# 📈 Strategic Trader AI")
     
     with gr.Row():
         with gr.Column(scale=1, variant="panel"):
-            book_upload = gr.File(label="1. Upload PDFs", file_count="multiple")
+            gr.Markdown("### 1. Strategy Setup")
+            book_upload = gr.File(label="Upload Trading Books (PDF)", file_count="multiple")
             train_btn = gr.Button("🧠 Train AI", variant="primary")
-            status = gr.Textbox(label="Status", value="Idle")
-            gr.Markdown("---")
+            status = gr.Textbox(label="System Status", value="Waiting for books...")
+            
+            gr.Markdown("### 2. Market Scan")
+            usage_bar = gr.Slider(0, 25, label="API Credits Used (Daily Limit: 25)", interactive=False)
             scan_btn = gr.Button("🚀 Run Quality Scan", variant="primary")
-            # Added a File component for downloading the CSV
-            csv_download = gr.File(label="2. Download Scan Report")
+            csv_download = gr.File(label="Download Report")
 
         with gr.Column(scale=3):
             with gr.Tabs():
-                with gr.TabItem("Market Scan"):
-                    output_table = gr.DataFrame(label="Top Momentum Candidates")
-                with gr.TabItem("AI Strategy Analysis"):
-                    output_text = gr.Markdown("Analysis will appear here...")
+                with gr.TabItem("Live Market Picks"):
+                    output_table = gr.DataFrame(interactive=False)
+                with gr.TabItem("AI Strategy Verdicts"):
+                    output_text = gr.Markdown("Analysis will appear here after the scan...")
 
+    # Event Mapping
     train_btn.click(ingest_strategy_books, [book_upload], [status])
-    # Note: Added csv_download to the outputs
-    scan_btn.click(run_strategic_scan, None, [output_table, csv_download, output_text])
+    
+    scan_btn.click(
+        run_strategic_scan, 
+        inputs=[usage_state], 
+        outputs=[output_table, csv_download, output_text, usage_state]
+    )
+    
+    # Update usage bar whenever state changes
+    usage_state.change(lambda x: x, inputs=[usage_state], outputs=[usage_bar])
 
 demo.launch()
