@@ -142,7 +142,7 @@ def run_strategic_scan(usage_count, progress=gr.Progress()):
             docs = vector_db.similarity_search(f"strategy for {ticker}", k=3)
             context = "\n".join([d.page_content for d in docs])
             
-            wizard_prompt = f"""
+            prompt = f"""
             ### STRATEGY CONTEXT: {context}
             ### DATA: {ticker} | Price: ${curr_price:.2f} | RS: {rs_score}% | Sentiment: {sentiment}
             Based on the Strategy: 
