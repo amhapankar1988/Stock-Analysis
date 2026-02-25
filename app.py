@@ -14,7 +14,7 @@ from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
 
 # --- CONFIGURATION ---
-DATASET_REPO_ID = "amhapankar/my-trading-brain"  # <--- UPDATE THIS
+DATASET_REPO_ID = "amhapankar/my-trading-brain" 
 HF_TOKEN = os.getenv("HF_TOKEN")
 AV_API_KEY = os.getenv("ALPHA_VANTAGE_KEY")
 WATSONX_APIKEY = os.getenv("WATSONX_APIKEY")
@@ -124,7 +124,7 @@ def run_strategic_scan(usage_count, progress=gr.Progress()):
             docs = vector_db.similarity_search(f"trading strategy for {ticker}", k=3)
             context = "\n".join([d.page_content for d in docs])
             
-            # --- THE PROMPT (DEFINED INSIDE THE LOOP) ---
+            # --- THE PROMPT ---
             scan_prompt = f"""
             ### STRATEGY CONTEXT: {context}
             ### DATA: {ticker} | Price: ${curr_price:.2f} | RS: {rs_score}% | Sentiment: {sentiment}
