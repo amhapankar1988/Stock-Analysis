@@ -101,7 +101,7 @@ def run_strategic_scan(usage_count, progress=gr.Progress()):
         foverview.set_filter(filters_dict={
             'EPS growthqtr over qtr': 'Over 25%',
             'Relative Volume': 'Over 1.5',
-            'Price': 'Over $25',  # Stocks greater than $25
+            'Price': 'Over $20',  # Stocks greater than $20
             'Sales growthqtr over qtr': 'Over 25%',  # Quarterly Sales growth
             '200-Day Simple Moving Average': 'Price above SMA200' # Confirming long-term trend
         })
