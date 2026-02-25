@@ -121,21 +121,17 @@ def run_strategic_scan(usage_count, progress=gr.Progress()):
             usage += 1
 
             # Get Knowledge Base Context
-            docs = vector_db.similarity_search(f"trading strategy for {ticker}", k=3)
+            docs = vector_db.similarity_search(f"strategy for {ticker}", k=3)
             context = "\n".join([d.page_content for d in docs])
             
             # --- THE PROMPT ---
-            scan_prompt = f"""
-            ### STRATEGY CONTEXT: {context}
-            ### DATA: {ticker} | Price: ${curr_price:.2f} | RS: {rs_score}% | Sentiment: {sentiment}
-            Audit this stock based on the strategy context:
-            1. Does Sentiment ({sentiment}) support the breakout?
-            2. Where is the technical Pivot?
-            3. Final Rating (BUY/WATCH/AVOID).
-            """
+            prompt_to_use = f"Context: {context}\n\nAnalyze: {ticker} at {curr_price} | RS: {rs_score}% | Sentiment: {sentiment}"
             
-            res = llm.invoke(scan_prompt)
+            # --- THE CALL ---
+            res = llm.invoke(prompt_to_use)
+            
             ai_verdict += f"## {ticker} ({sentiment})\n{res.content}\n\n---\n"
+            
             table_data.append([ticker, f"${curr_price:.2f}", f"{rs_score}%", sentiment])
             chart_previews.append((f"https://charts2.finviz.com/chart.ashx?t={ticker}&ty=c&ta=1&p=d&s=l", f"{ticker} Daily"))
 
