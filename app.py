@@ -58,65 +58,69 @@ def run_strategic_scan(usage_count, progress=gr.Progress()):
     try:
         progress(0.1, desc="🔍 Screening Finviz for Momentum...")
         foverview = Overview()
-        # Initial filter for growth + technical health
         foverview.set_filter(filters_dict={
             'EPS growthqtr over qtr': 'Over 25%',
             'Relative Volume': 'Over 1.5',
             '200-Day Simple Moving Average': 'Price above SMA200'
         })
-        # Sort by Weekly Performance to prioritize the best candidates
         df_screener = foverview.screener_view(order='Performance (Week)', ascend=False)
         
         if df_screener is None or df_screener.empty:
             return None, None, "No stocks currently match the momentum criteria.", usage
 
-        # Take top 4 candidates to keep API usage low
         candidates = df_screener['Ticker'].tolist()[:4]
         table_data = []
         ai_verdict = ""
 
-        # Fetch SPY Benchmark (1 API Call)
-        progress(0.2, desc="📊 Fetching SPY (API Call)...")
-        spy_data, _ = ts.get_daily(symbol='SPY', outputsize='full')
-        spy_close = spy_data['4. close'].iloc[-252:]
+        # Fetch SPY Benchmark (1 API Call) - Using 'compact' for FREE tier
+        progress(0.2, desc="📊 Fetching SPY (Free API Call)...")
+        spy_data, _ = ts.get_daily(symbol='SPY', outputsize='compact') 
+        spy_close = spy_data['4. close']
         usage += 1
 
         for ticker in candidates:
             if usage >= 25: break
             
             progress(0.3 + (usage/25), desc=f"📈 Analyzing {ticker} (Usage: {usage}/25)...")
-            time.sleep(12) # MANDATORY: 5 calls/minute limit
+            time.sleep(12) 
             
             try:
-                data, _ = ts.get_daily(symbol=ticker, outputsize='full')
+                # Switching to 'compact' to stay on Free Tier
+                data, _ = ts.get_daily(symbol=ticker, outputsize='compact')
                 usage += 1
-                close = data['4. close'].iloc[-252:]
+                close = data['4. close']
                 
-                # Calculations
-                rs_score = round(((close.iloc[-1]/close.iloc[0]) - (spy_close.iloc[-1]/spy_close.iloc[0])) * 100, 2)
-                curr_price = close.iloc[-1]
-                high_52w = close.max()
+                # Calculations (Using 100-day window)
+                # Performance is now calculated over the available 100 days
+                stock_perf = (close.iloc[0] / close.iloc[-1]) - 1 # Note: AV data is desc (newest first)
+                spy_perf = (spy_close.iloc[0] / spy_close.iloc[-1]) - 1
+                rs_score = round((stock_perf - spy_perf) * 100, 2)
                 
-                # Pivot Watch: Within 5% of 52-week high
-                if rs_score > 0 and curr_price >= (high_52w * 0.95):
-                    table_data.append([ticker, f"${curr_price:.2f}", f"{rs_score}%", "PIVOT WATCH"])
-                    
-                    # AI Contextual Analysis
+                curr_price = close.iloc[0]
+                high_period = close.max() # This is now the 100-day high
+                
+                # Check for "Power Pivot": Within 3% of 100-day High
+                if curr_price >= (high_period * 0.97):
+                    status_tag = "🚀 BREAKOUT WATCH"
                     docs = vector_db.similarity_search(f"trading strategy for {ticker}", k=2)
                     context = "\n".join([d.page_content for d in docs])
-                    prompt = f"Using this strategy: {context}\n\nAnalyze {ticker} at ${curr_price:.2f} with RS {rs_score}%."
+                    prompt = f"Strategy: {context}\n\nAnalyze {ticker} at ${curr_price:.2f}. It is at a 100-day high with RS score {rs_score}%."
                     res = llm.invoke(prompt)
                     ai_verdict += f"## {ticker} Verdict\n{res.content}\n\n---\n"
                 else:
-                    table_data.append([ticker, f"${curr_price:.2f}", f"{rs_score}%", "Consolidating"])
+                    status_tag = "Consolidating"
 
-            except Exception: continue
+                table_data.append([ticker, f"${curr_price:.2f}", f"{rs_score}%", status_tag])
 
-        final_df = pd.DataFrame(table_data, columns=["Ticker", "Price", "RS Score", "Status"])
+            except Exception as e: 
+                print(f"Error on {ticker}: {e}")
+                continue
+
+        final_df = pd.DataFrame(table_data, columns=["Ticker", "Price", "RS (100d)", "Status"])
         csv_path = "scan_results.csv"
         final_df.to_csv(csv_path, index=False)
         
-        return final_df, csv_path, ai_verdict or "Scan complete. Review results below.", usage
+        return final_df, csv_path, ai_verdict or "Scan complete. No 100-day breakouts detected.", usage
 
     except Exception as e:
         return None, None, f"### ❌ API Error: {str(e)}", usage
