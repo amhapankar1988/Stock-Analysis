@@ -142,17 +142,20 @@ def run_strategic_scan(usage_count, progress=gr.Progress()):
             docs = vector_db.similarity_search(f"strategy for {ticker}", k=3)
             context = "\n".join([d.page_content for d in docs])
             
+           # DEFINE THE PROMPT 
             prompt = f"""
             ### STRATEGY CONTEXT: {context}
             ### DATA: {ticker} | Price: ${curr_price:.2f} | RS: {rs_score}% | Sentiment: {sentiment}
-            Based on the Strategy: 
-            1. Is there a Bullish News Catalyst?
-            2. Identify the 'Cheat' entry or Pivot.
-            3. Final Rating: BUY, WATCH, or AVOID.
+            Audit this stock based on the strategy: 
+            - Identify the Pivot.
+            - Catalyst check.
+            - Final Verdict (BUY/WATCH/AVOID).
             """
             
-            res = llm.invoke(prompt)
-            ai_verdict += f"## {ticker} Analysis\n{res.content}\n\n---\n"
+            # INVOKE LLM
+            res = llm.invoke(prompt) 
+            ai_verdict += f"## {ticker}\n{res.content}\n\n---\n"
+        
             table_data.append([ticker, f"${curr_price:.2f}", f"{rs_score}%", sentiment])
 
         final_df = pd.DataFrame(table_data, columns=["Ticker", "Price", "RS Score", "Sentiment"])
