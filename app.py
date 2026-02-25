@@ -57,43 +57,37 @@ def run_strategic_scan(progress=gr.Progress()):
     ts = TimeSeries(key=AV_API_KEY, output_format='pandas')
     
     try:
-        progress(0.1, desc="🔍 Fundamental Screen & Momentum Sort...")
+        progress(0.1, desc="🔍 Fundamental Screen...")
         foverview = Overview()
-        
-        # We add 'Relative Volume' to ensure we only look at stocks traders are active in today
-        filters = {
+        foverview.set_filter(filters_dict={
             'EPS growthqtr over qtr': 'Over 25%',
             'Sales growthqtr over qtr': 'Over 25%',
             '200-Day Simple Moving Average': 'Price above SMA200',
             'Relative Volume': 'Over 1.5' 
-        }
-        foverview.set_filter(filters_dict=filters)
+        })
         
-        # Sort by Weekly Performance DESCENDING to find the strongest momentum
         df_screener = foverview.screener_view(order='Performance (Week)', ascend=False)
-        
         if df_screener is None or df_screener.empty:
-            return None, None, "No candidates found meeting the momentum criteria."
+            return None, None, "No candidates found."
 
-        # Take only the Top 4 to stay safe with Alpha Vantage Free Tier (5/min limit)
         candidates = df_screener['Ticker'].tolist()[:4]
         table_data = []
         ai_verdict = ""
 
-        progress(0.3, desc="📊 Fetching SPY Benchmark...")
-        spy_data, _ = ts.get_daily_adjusted(symbol='SPY', outputsize='full')
-        spy_close = spy_data['5. adjusted close'].iloc[-252:]
+        # Use get_daily (FREE) instead of get_daily_adjusted (PREMIUM)
+        progress(0.2, desc="📊 Fetching SPY Benchmark...")
+        spy_data, _ = ts.get_daily(symbol='SPY', outputsize='full')
+        # Free tier uses '4. close' instead of '5. adjusted close'
+        spy_close = spy_data['4. close'].iloc[-252:] 
 
         for ticker in candidates:
-            progress(0.5, desc=f"📈 API Analysis: {ticker}...")
+            progress(0.5, desc=f"📈 Analyzing {ticker}...")
+            time.sleep(12) # Respecting 5 calls/min limit
             
-            # 12-second sleep is MANDATORY for Alpha Vantage Free Tier
-            time.sleep(12) 
+            data, _ = ts.get_daily(symbol=ticker, outputsize='full')
+            close = data['4. close'].iloc[-252:]
             
-            data, _ = ts.get_daily_adjusted(symbol=ticker, outputsize='full')
-            close = data['5. adjusted close'].iloc[-252:]
-            
-            # Technical Calculations
+            # Calculations
             stock_perf = (close.iloc[-1] / close.iloc[0]) - 1
             spy_perf = (spy_close.iloc[-1] / spy_close.iloc[0]) - 1
             rs_score = round((stock_perf - spy_perf) * 100, 2)
@@ -101,26 +95,22 @@ def run_strategic_scan(progress=gr.Progress()):
             high_52w = close.max()
             curr = close.iloc[-1]
             
-            # Pivot Check (Livermore Style)
             if rs_score > 0 and curr >= (high_52w * 0.95):
                 table_data.append([ticker, f"${curr:.2f}", f"{rs_score}%", "TOP MOMENTUM"])
-                
-                # RAG Analysis
-                docs = vector_db.similarity_search(f"High volume breakout strategy for {ticker}", k=2)
+                docs = vector_db.similarity_search(f"Strategy for {ticker}", k=2)
                 context = "\n".join([d.page_content for d in docs])
                 res = llm.invoke(f"Strategy: {context}\n\nAnalyze {ticker} at ${curr:.2f} (RS: {rs_score}%).")
                 ai_verdict += f"## {ticker} Analysis\n{res.content}\n\n---\n"
 
         final_df = pd.DataFrame(table_data, columns=["Ticker", "Price", "RS vs SPY", "Status"])
-        
-        # Save a local copy for the user to download
         csv_path = "latest_scan_results.csv"
         final_df.to_csv(csv_path, index=False)
         
-        return final_df, csv_path, ai_verdict or "Scan complete. No high-conviction pivots found."
+        return final_df, csv_path, ai_verdict or "Scan complete."
 
     except Exception as e:
-        return None, None, f"### ❌ Error: {str(e)}"
+        # Improved error catching to see exactly what Alpha Vantage says
+        return None, None, f"### ❌ API Error: {str(e)}"
 
 # --- UPDATED GRADIO UI ---
 with gr.Blocks(theme=gr.themes.Soft(), title="Strategic Trader AI") as demo:
