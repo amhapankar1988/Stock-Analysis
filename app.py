@@ -17,7 +17,7 @@ DATASET_REPO_ID = "amhapankar/my-trading-brain"  # <--- UPDATE THIS
 HF_TOKEN = os.getenv("HF_TOKEN")
 AV_API_KEY = os.getenv("ALPHA_VANTAGE_KEY")
 WATSONX_APIKEY = os.getenv("WATSONX_APIKEY")
-PROJECT_ID = os.getenv("WATSONX_PROJECT_ID”)
+PROJECT_ID = os.getenv("WATSONX_PROJECT_ID")
 
 # --- INITIALIZE MODELS ---
 llm = ChatWatsonx(
