@@ -14,7 +14,7 @@ from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
 
 # --- CONFIGURATION ---
-DATASET_REPO_ID = "your-username/trading-brain"  # <--- UPDATE THIS
+DATASET_REPO_ID = "amhapankar/my-trading-brain"  # <--- UPDATE THIS
 HF_TOKEN = os.getenv("HF_TOKEN")
 AV_API_KEY = os.getenv("ALPHA_VANTAGE_KEY")
 WATSONX_APIKEY = os.getenv("WATSONX_APIKEY")
