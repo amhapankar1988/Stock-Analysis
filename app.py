@@ -136,6 +136,9 @@ def run_strategic_scan(usage_count, progress=gr.Progress()):
             chart_previews.append((f"https://charts2.finviz.com/chart.ashx?t={ticker}&ty=c&ta=1&p=d&s=l", f"{ticker} Daily"))
 
         final_df = pd.DataFrame(table_data, columns=["Ticker", "Price", "RS Score", "Sentiment"])
+
+        final_df.to_csv("report.csv", index=False)
+        
         return final_df, "report.csv", ai_verdict, usage, chart_previews
 
     except Exception as e:
