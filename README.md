@@ -8,7 +8,7 @@ sdk_version: 5.16.0
 app_file: app.py
 pinned: true
 license: mit
-short_description: An AI-powered trading terminal for scanning growth stocks using RAG.
+short_description: AI trading terminal using Finviz & RAG strategy auditing.
 ---
 
 # 🚀 AI Strategic Trader Pro
