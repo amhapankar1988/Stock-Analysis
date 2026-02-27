@@ -101,7 +101,7 @@ def run_strategic_scan(usage_count, progress=gr.Progress()):
         
         table_data, chart_previews, ai_verdict = [], [], ""
         
-        # Benchmark
+        # Benchmark (SPY)
         spy_data, _ = ts.get_daily(symbol='SPY', outputsize='compact')
         usage += 1
         spy_close = spy_data['4. close']
@@ -114,30 +114,48 @@ def run_strategic_scan(usage_count, progress=gr.Progress()):
             data, _ = ts.get_daily(symbol=ticker, outputsize='compact')
             usage += 1
             curr_price = data['4. close'].iloc[0]
-            rs_score = round(((curr_price/data['4. close'].iloc[-1]) - (spy_close.iloc[0]/spy_close.iloc[-1])) * 100, 2)
             
+            # Relative Strength Calculation
+            stock_perf = (curr_price / data['4. close'].iloc[-1]) - 1
+            spy_perf = (spy_close.iloc[0] / spy_close.iloc[-1]) - 1
+            rs_score = round((stock_perf - spy_perf) * 100, 2)
+            
+            # Sentiment Analysis
             news_url = f"https://www.alphavantage.co/query?function=NEWS_SENTIMENT&tickers={ticker}&limit=3&apikey={AV_API_KEY}"
-            sentiment = requests.get(news_url).json().get("feed", [{}])[0].get("overall_sentiment_label", "Neutral")
+            sentiment_resp = requests.get(news_url).json()
+            sentiment = sentiment_resp.get("feed", [{}])[0].get("overall_sentiment_label", "Neutral")
             usage += 1
 
-            # Get Knowledge Base Context
+            # RAG Context
             docs = vector_db.similarity_search(f"strategy for {ticker}", k=3)
             context = "\n".join([d.page_content for d in docs])
             
-            # --- THE PROMPT ---
-            prompt_to_use = f"Context: {context}\n\nAnalyze: {ticker} at {curr_price} | RS: {rs_score}% | Sentiment: {sentiment}"
+            # --- FIXED PROMPT (Prevents Tool-Call Hallucinations) ---
+            structured_prompt = f"""<|begin_of_text|><|start_header_id|>system<|end_header_id|>
+            You are a professional stock market auditor. Your goal is to provide a text-based analysis. 
+            Do NOT output tool calls or function requests. Use the provided strategy context to audit the stock data.
+            <|eot_id|><|start_header_id|>user<|end_header_id|>
             
-            # --- THE CALL ---
-            res = llm.invoke(prompt_to_use)
+            STRATEGY CONTEXT:
+            {context}
+
+            MARKET DATA:
+            Ticker: {ticker}
+            Price: ${curr_price:.2f}
+            Relative Strength: {rs_score}% vs SPY
+            Sentiment: {sentiment}
+
+            Provide a concise 'Triple Screen' audit. End with a Recommendation (BUY/WATCH/AVOID).<|eot_id|><|start_header_id|>assistant<|end_header_id|>"""
             
-            ai_verdict += f"## {ticker} ({sentiment})\n{res.content}\n\n---\n"
+            res = llm.invoke(structured_prompt)
             
+            ai_verdict += f"## {ticker} Audit\n{res.content}\n\n---\n"
             table_data.append([ticker, f"${curr_price:.2f}", f"{rs_score}%", sentiment])
             chart_previews.append((f"https://charts2.finviz.com/chart.ashx?t={ticker}&ty=c&ta=1&p=d&s=l", f"{ticker} Daily"))
 
+        # --- SAVE TO DISK ---
         final_df = pd.DataFrame(table_data, columns=["Ticker", "Price", "RS Score", "Sentiment"])
-
-        final_df.to_csv("report.csv", index=False)
+        final_df.to_csv("report.csv", index=False) 
         
         return final_df, "report.csv", ai_verdict, usage, chart_previews
 
