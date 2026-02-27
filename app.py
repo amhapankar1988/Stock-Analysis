@@ -108,6 +108,15 @@ def run_strategic_scan(usage_count, progress=gr.Progress()):
 
         for ticker in candidates:
             if usage >= 25: break
+
+            # --- NEW: Extract Fundamentals from the screener dataframe ---
+            # This looks up the row for the specific ticker and gets the growth stats
+            ticker_row = df_screener[df_screener['Ticker'] == ticker].iloc[0]
+            eps_growth = ticker_row.get('EPS Q/Q', 'N/A')
+            sales_growth = ticker_row.get('Sales Q/Q', 'N/A')
+            pe_ratio = ticker_row.get('P/E', 'N/A')
+            # -------------------------------------------------------------
+            
             time.sleep(12) # Rate limit protection
             
             # Fetch Price & News
@@ -132,20 +141,23 @@ def run_strategic_scan(usage_count, progress=gr.Progress()):
             
             # --- FIXED PROMPT (Prevents Tool-Call Hallucinations) ---
             structured_prompt = f"""<|begin_of_text|><|start_header_id|>system<|end_header_id|>
-            You are a professional stock market auditor. Your goal is to provide a text-based analysis. 
-            Do NOT output tool calls or function requests. Use the provided strategy context to audit the stock data.
+            You are a professional stock market auditor. Use the provided data to perform a 'Triple Screen' audit.
             <|eot_id|><|start_header_id|>user<|end_header_id|>
             
             STRATEGY CONTEXT:
             {context}
 
-            MARKET DATA:
-            Ticker: {ticker}
-            Price: ${curr_price:.2f}
-            Relative Strength: {rs_score}% vs SPY
-            Sentiment: {sentiment}
+            MARKET DATA for {ticker}:
+            - Price: ${curr_price:.2f}
+            - RS Score: {rs_score}%
+            - Sentiment: {sentiment}
+            
+            FUNDAMENTALS (Finviz):
+            - EPS Growth (Q/Q): {eps_growth}
+            - Sales Growth (Q/Q): {sales_growth}
+            - P/E Ratio: {pe_ratio}
 
-            Provide a concise 'Triple Screen' audit. End with a Recommendation (BUY/WATCH/AVOID).<|eot_id|><|start_header_id|>assistant<|end_header_id|>"""
+            Audit this setup based on the Strategy Context. Does it meet the growth requirements?<|eot_id|><|start_header_id|>assistant<|end_header_id|>"""
             
             res = llm.invoke(structured_prompt)
             
