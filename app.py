@@ -84,18 +84,51 @@ def load_brain_from_hub():
 def ingest_strategy_books(uploaded_files):
     try:
         documents = []
-        for uploaded_file in uploaded_files:
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        # 1. Loading PDFs
+        status_text.text("📄 Reading PDFs...")
+        total_files = len(uploaded_files)
+        for i, uploaded_file in enumerate(uploaded_files):
             temp_path = f"temp_{uploaded_file.name}"
             with open(temp_path, "wb") as f:
                 f.write(uploaded_file.getbuffer())
-            documents.extend(PyPDFLoader(temp_path).load())
+            
+            loader = PyPDFLoader(temp_path)
+            documents.extend(loader.load())
             os.remove(temp_path)
+            
+            # Update progress (0% to 30% range)
+            progress_bar.progress(int((i + 1) / total_files * 30))
         
-        splits = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100).split_documents(documents)
+        # 2. Splitting Text
+        status_text.text("✂️ Splitting documents into chunks...")
+        splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+        splits = splitter.split_documents(documents)
+        progress_bar.progress(50)
+        
+        # 3. Embedding and Indexing (The heavy part)
+        status_text.text("🧠 Generating embeddings and building index...")
+        # Note: Using Endpoint Embeddings here is fast because it's API-based
         st.session_state.vector_db = FAISS.from_documents(splits, embeddings)
+        progress_bar.progress(80)
+        
+        # 4. Syncing to Cloud
+        status_text.text("☁️ Syncing brain to Hugging Face...")
         save_brain_to_hub()
-        st.success(f"✅ Strategy Ready: {len(splits)} chunks indexed.")
+        
+        # 5. Complete
+        progress_bar.progress(100)
+        status_text.empty()
+        st.success(f"✅ Strategy Ready: {len(splits)} chunks indexed and synced to cloud.")
+        
+        # Trigger a short balloon celebration for UX
+        st.balloons()
+        
     except Exception as e:
+        status_text.empty()
+        progress_bar.empty()
         st.error(f"❌ Ingestion Error: {str(e)}")
 
 def run_strategic_scan():
